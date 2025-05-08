@@ -1,5 +1,34 @@
 {
     "name": "ShipControls",
-    "maps": [],
+    "maps": [
+        {
+            "name": "Player",
+            "id": "96dd08f8-6af1-4b10-9941-9de2ba9daa14",
+            "actions": [
+                {
+                    "name": "Move (WASD)",
+                    "type": "Value",
+                    "id": "2baef04a-da24-43ed-98dc-2542e61d1151",
+                    "expectedControlType": "Vector2",
+                    "processors": "",
+                    "interactions": "",
+                    "initialStateCheck": true
+                }
+            ],
+            "bindings": [
+                {
+                    "name": "",
+                    "id": "702204de-9cdd-4f8b-bc8b-ce3443b269b7",
+                    "path": "",
+                    "interactions": "",
+                    "processors": "",
+                    "groups": "",
+                    "action": "Move (WASD)",
+                    "isComposite": false,
+                    "isPartOfComposite": false
+                }
+            ]
+        }
+    ],
     "controlSchemes": []
 }
