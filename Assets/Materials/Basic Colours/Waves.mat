@@ -140,8 +140,8 @@ Material:
     - _EmissionColor: {r: 0, g: 0, b: 0, a: 1}
     - _SpecColor: {r: 0.19999996, g: 0.19999996, b: 0.19999996, a: 1}
     - _WaterFogColor: {r: 0.19199994, g: 0.40199995, b: 0.518, a: 1}
-    - _WaveA: {r: 1, g: 0, b: 0.5, a: 10}
-    - _WaveB: {r: 0, g: 1, b: 0.25, a: 20}
-    - _WaveC: {r: 1, g: 1, b: 0.15, a: 10}
+    - _WaveA: {r: 1, g: 0, b: 0.25, a: 10}
+    - _WaveB: {r: 0, g: 1, b: 0.125, a: 20}
+    - _WaveC: {r: 1, g: 1, b: 0.075, a: 10}
   m_BuildTextureStacks: []
   m_AllowLocking: 1
