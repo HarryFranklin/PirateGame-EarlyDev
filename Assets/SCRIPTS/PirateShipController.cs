@@ -17,8 +17,8 @@ public class PirateShipController : MonoBehaviour
     [SerializeField] private float halfDownSpeed = 4.0f;
     [SerializeField] private float fullyDownSpeed = 6.0f;
     [SerializeField] private Vector3 modelRotationOffset = new Vector3(0f, -90f, 0f);
-
-    private PlayerInputHandler inputHandler;
+    
+    [SerializeField] private PlayerInputHandler inputHandler;
     private float currentSpeed = 0f;
     private float targetSpeed = 0f;
 
@@ -55,7 +55,7 @@ public class PirateShipController : MonoBehaviour
     public event ShipStateChangedHandler OnSailStateChanged;
     public event ShipStateChangedHandler OnAnchorStateChanged;
 
-    private void Awake()
+    private void Start()
     {
         inputHandler = PlayerInputHandler.Instance;
         if (inputHandler == null)
