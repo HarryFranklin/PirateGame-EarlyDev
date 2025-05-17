@@ -2,9 +2,9 @@ Shader "Custom/Waves"
 {
     Properties
     {
-        [MainColor] _BaseColor("Color", Color) = (0.5,0.8,0.9,1)
+        [MainColor] _BaseColor("Color", Color) = (0.5,0.8,0.9,0.8)
         [MainTexture] _BaseMap("Albedo (RGB)", 2D) = "white" {}
-        _Smoothness("Smoothness", Range(0,1)) = 0.5
+        _Smoothness("Smoothness", Range(0,1)) = 0.8
         _Metallic("Metallic", Range(0,1)) = 0.0
         
         // Wave properties
@@ -12,15 +12,22 @@ Shader "Custom/Waves"
         _WaveB("Wave B", Vector) = (0,1,0.25,20)
         _WaveC("Wave C", Vector) = (1,1,0.15,10)
         _WaveSpeed("Wave Speed", Float) = 1.0
+        
+        // Water fog properties
+        _WaterFogColor("Water Fog Color", Color) = (0.192, 0.402, 0.518, 1.0)
+        _WaterFogDensity("Water Fog Density", Range(0, 2)) = 0.1
+        
+        // Refraction properties
+        _RefractionStrength("Refraction Strength", Range(0, 1)) = 0.25
     }
 
     SubShader
     {
         Tags
         {
-            "RenderType" = "Opaque"
+            "RenderType" = "Transparent"
             "RenderPipeline" = "UniversalPipeline"
-            "Queue" = "Geometry"
+            "Queue" = "Transparent"
         }
         LOD 300
 
@@ -28,23 +35,30 @@ Shader "Custom/Waves"
         {
             Name "ForwardLit"
             Tags { "LightMode" = "UniversalForward" }
+            
+            Blend SrcAlpha OneMinusSrcAlpha
+            ZWrite On
 
             HLSLPROGRAM
             #pragma vertex vert
             #pragma fragment frag
             
-            // Unity defined keywords
+            // Unity keywords
             #pragma multi_compile _ _MAIN_LIGHT_SHADOWS
+            #pragma multi_compile _ _MAIN_LIGHT_SHADOWS_CASCADE
             #pragma multi_compile _ _ADDITIONAL_LIGHTS
             #pragma multi_compile_fog
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareDepthTexture.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareOpaqueTexture.hlsl"
 
             struct Attributes
             {
                 float4 positionOS : POSITION;
                 float3 normalOS : NORMAL;
+                float4 tangentOS : TANGENT;
                 float2 uv : TEXCOORD0;
             };
 
@@ -54,8 +68,11 @@ Shader "Custom/Waves"
                 float2 uv : TEXCOORD0;
                 float3 positionWS : TEXCOORD1;
                 float3 normalWS : TEXCOORD2;
+                float4 tangentWS : TEXCOORD3;
                 float4 shadowCoord : TEXCOORD4;
                 float fogFactor : TEXCOORD5;
+                float4 screenPos : TEXCOORD6;
+                float3 viewDirWS : TEXCOORD7;
             };
 
             TEXTURE2D(_BaseMap);
@@ -68,6 +85,9 @@ Shader "Custom/Waves"
                 half _Metallic;
                 float4 _WaveA, _WaveB, _WaveC;
                 float _WaveSpeed;
+                float3 _WaterFogColor;
+                float _WaterFogDensity;
+                float _RefractionStrength;
             CBUFFER_END
 
             float3 GerstnerWave(float4 wave, float3 p, inout float3 tangent, inout float3 binormal)
@@ -97,10 +117,39 @@ Shader "Custom/Waves"
                 );
             }
 
+            // Underwater color sampling with refraction using CameraOpaqueTexture
+            float3 ColorBelowWater(float4 screenPos, float3 tangentSpaceNormal)
+            {
+                // Calculate screen position UV and apply refraction offset
+                float2 uvOffset = tangentSpaceNormal.xy * _RefractionStrength;
+                float2 uv = (screenPos.xy + uvOffset * screenPos.w) / screenPos.w;
+                
+                // Get depth information
+                float backgroundDepth = LinearEyeDepth(SampleSceneDepth(uv), _ZBufferParams);
+                float surfaceDepth = LinearEyeDepth(screenPos.z / screenPos.w, _ZBufferParams);
+                float depthDifference = backgroundDepth - surfaceDepth;
+                
+                // Scale refraction based on depth difference (reduce refraction in shallow water)
+                uvOffset *= saturate(depthDifference);
+                uv = (screenPos.xy + uvOffset * screenPos.w) / screenPos.w;
+                
+                // Resample depth with corrected UV
+                backgroundDepth = LinearEyeDepth(SampleSceneDepth(uv), _ZBufferParams);
+                depthDifference = backgroundDepth - surfaceDepth;
+                
+                // Sample background color using URP's CameraOpaqueTexture
+                float3 backgroundColor = SampleSceneColor(uv);
+                
+                // Apply underwater fog based on depth
+                float fogFactor = exp2(-_WaterFogDensity * depthDifference);
+                return lerp(_WaterFogColor, backgroundColor, fogFactor);
+            }
+
             Varyings vert(Attributes input)
             {
                 Varyings output = (Varyings)0;
                 
+                // Calculate wave position and normal
                 float3 gridPoint = input.positionOS.xyz;
                 float3 tangent = float3(1, 0, 0);
                 float3 binormal = float3(0, 0, 1);
@@ -112,18 +161,21 @@ Shader "Custom/Waves"
                 p += GerstnerWave(_WaveC, gridPoint, tangent, binormal);
                 
                 // Calculate normal from modified tangent and binormal
-                float3 normal = normalize(cross(binormal, tangent));
+                float3 waveNormal = normalize(cross(binormal, tangent));
                 
                 // Convert to world space
                 VertexPositionInputs posInputs = GetVertexPositionInputs(p);
-                VertexNormalInputs normInputs = GetVertexNormalInputs(normal);
+                VertexNormalInputs normInputs = GetVertexNormalInputs(waveNormal, input.tangentOS);
                 
                 output.positionCS = posInputs.positionCS;
                 output.positionWS = posInputs.positionWS;
                 output.normalWS = normInputs.normalWS;
+                output.tangentWS = float4(normInputs.tangentWS, input.tangentOS.w);
                 output.uv = TRANSFORM_TEX(input.uv, _BaseMap);
+                output.screenPos = posInputs.positionNDC;
+                output.viewDirWS = GetWorldSpaceViewDir(posInputs.positionWS);
                 
-                // Calculate shadow coords
+                // Calculate shadow coordinates
                 #if defined(_MAIN_LIGHT_SHADOWS)
                     output.shadowCoord = GetShadowCoord(posInputs);
                 #else
@@ -149,7 +201,18 @@ Shader "Custom/Waves"
                 
                 // Basic PBR setup
                 float3 normalWS = normalize(input.normalWS);
-                float3 viewDirWS = GetWorldSpaceNormalizeViewDir(input.positionWS);
+                float3 viewDirWS = normalize(input.viewDirWS);
+                
+                // Create tangent space to world space transformation
+                float3 bitangentWS = normalize(cross(normalWS, input.tangentWS.xyz) * input.tangentWS.w);
+                float3x3 tangentToWorld = float3x3(
+                    input.tangentWS.xyz,
+                    bitangentWS,
+                    normalWS
+                );
+                
+                // Surface normal in tangent space (just use normal map values to approximate wave ripples)
+                float3 tangentNormal = float3(0, 0, 1);
                 
                 // Direct lighting calculation
                 float NdotL = saturate(dot(normalWS, mainLight.direction));
@@ -164,15 +227,21 @@ Shader "Custom/Waves"
                 float specularTerm = roughnessSq / (d * d) * 0.1;
                 specularTerm *= min(1.0, LdotH * 2.0);
                 
+                // Calculate underwater color with refraction
+                float3 underwaterColor = ColorBelowWater(input.screenPos, tangentNormal);
+                
                 // Calculate direct lighting
                 float3 directDiffuse = albedo.rgb * NdotL * mainLight.color * mainLight.shadowAttenuation;
-                float3 directSpecular = specularTerm * lerp(albedo.rgb, 1.0, _Metallic) * mainLight.color * mainLight.shadowAttenuation;
+                float3 directSpecular = specularTerm * lerp(0.04, albedo.rgb, _Metallic) * mainLight.color * mainLight.shadowAttenuation;
                 
                 // Ambient lighting (simplified)
                 float3 ambient = albedo.rgb * 0.1;
                 
-                // Final color
+                // Combine everything
                 float3 finalColor = directDiffuse + directSpecular + ambient;
+                
+                // Add underwater color based on water transparency
+                finalColor = lerp(underwaterColor, finalColor, albedo.a);
                 
                 // Apply fog
                 finalColor = MixFog(finalColor, input.fogFactor);
@@ -206,6 +275,9 @@ Shader "Custom/Waves"
                 half _Metallic;
                 float4 _WaveA, _WaveB, _WaveC;
                 float _WaveSpeed;
+                float3 _WaterFogColor;
+                float _WaterFogDensity;
+                float _RefractionStrength;
             CBUFFER_END
 
             struct Attributes
@@ -251,7 +323,7 @@ Shader "Custom/Waves"
                 float3 positionWS = TransformObjectToWorld(positionOS);
                 float3 normalWS = TransformObjectToWorldNormal(normalOS);
 
-                #if defined(_MAIN_LIGHT_SHADOWS)
+                #if defined(_MAIN_LIGHT_SHADOWS_CASCADE) || defined(_MAIN_LIGHT_SHADOWS)
                     float3 lightDirectionWS = _MainLightPosition.xyz;
                     float4 positionCS = TransformWorldToHClip(ApplyShadowBias(positionWS, normalWS, lightDirectionWS));
                 #else
@@ -317,6 +389,9 @@ Shader "Custom/Waves"
                 half _Metallic;
                 float4 _WaveA, _WaveB, _WaveC;
                 float _WaveSpeed;
+                float3 _WaterFogColor;
+                float _WaterFogDensity;
+                float _RefractionStrength;
             CBUFFER_END
 
             struct Attributes
